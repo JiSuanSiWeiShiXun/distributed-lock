@@ -2,8 +2,8 @@ package redis
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -15,16 +15,16 @@ import (
 */
 
 // NewRedisMutex 工厂函数，返回redis分布式锁句柄
-func NewRedisMutex(addr, pwd, key string, timeout int) *RedisMutex {
-	c := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: pwd,
-	})
+// timeout 单位为秒
+func NewRedisMutex(c *redis.Client, key string, timeout int) (*RedisMutex, error) {
+	if res, err := c.Ping(context.Background()).Result(); err != nil || res != "PONG" {
+		return nil, fmt.Errorf("invalid redis client, ping returns %v", res)
+	}
 	return &RedisMutex{
 		client:  c,
 		key:     key,
 		timeout: timeout,
-	}
+	}, nil
 }
 
 // Key return redis key
@@ -38,12 +38,36 @@ func (m *RedisMutex) Lock() error {
 	if err != nil && err != redis.Nil {
 		return err
 	} else if res != 1 {
-		return errors.New("redis transaction doesn't return 1")
+		return fmt.Errorf("redis transaction failed: %v", res)
 	}
 	return nil
 }
 
 // Lock 解锁
-func (m *RedisMutex) Unlock() {
+func (m *RedisMutex) Unlock() error {
+	res, err := unlock.Run(context.Background(), m.client, []string{m.Key()}).Int64()
+	if err != nil && err != redis.Nil {
+		return err
+	} else if res != 1 {
+		return fmt.Errorf("redis transaction failed: %v", res)
+	}
+	return nil
+}
 
+// LockWithTimeout 尝试加锁，失败重试，直到超时
+func (m *RedisMutex) LockWithTimeout(timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	tickr := time.NewTicker(100 * time.Millisecond)
+	for {
+		select {
+		case <-tickr.C:
+			if err := m.Lock(); err != nil {
+				break
+			} else {
+				return nil
+			}
+		case <-timer.C:
+			return fmt.Errorf("[key] %v unavailable", m.Key())
+		}
+	}
 }

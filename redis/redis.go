@@ -10,6 +10,7 @@ type RedisMutex struct {
 	timeout int
 }
 
+// redis获取锁操作的lua实现
 var safeLock = redis.NewScript(`
 	local key = KEYS[1]
 	local r = redis.call("SETNX", key, 1)
@@ -21,8 +22,22 @@ var safeLock = redis.NewScript(`
 	return 1
 `)
 
+// redis释放锁
+var unlock = redis.NewScript(`
+	redis.call("del", KEYS[1])
+	return "OK"
+`)
+
+// 测试发现有个坑，这个示例中的两个set命令即便执行成功，这个判断语句也不会走进return "OK"，而是会走进return "SHIT"
 var tmpTransaction = redis.NewScript(`
-	redis.call("SET", "random", 1)
-	redis.call("SET", "key", 2)
-	return 1
+	local r1 = redis.call('SET', KEYS[1], ARGV[1])
+	local r2 = redis.call('SET', KEYS[2], ARGV[2])
+
+	--if r1 == "OK" and r2 == "OK" then
+	-- 	return "OK"
+	--else
+	--	return "SHIT"
+	--end
+
+	return "OK"
 `)
