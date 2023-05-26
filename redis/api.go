@@ -32,7 +32,7 @@ func (m *RedisMutex) Key() string {
 	return fmt.Sprintf("lock_%v", m.key)
 }
 
-// Lock 上锁
+// Lock 请求获取锁，失败直接返回
 func (m *RedisMutex) Lock() error {
 	res, err := safeLock.Run(context.Background(), m.client, []string{m.Key()}, m.timeout).Int64()
 	if err != nil && err != redis.Nil {
@@ -54,7 +54,8 @@ func (m *RedisMutex) Unlock() error {
 	return nil
 }
 
-// LockWithTimeout 尝试加锁，失败重试，直到超时
+// LockWithTimeout 带超时时间的自旋锁
+// 尝试加锁，失败重试，直到超时，返回失败
 func (m *RedisMutex) LockWithTimeout(timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	tickr := time.NewTicker(100 * time.Millisecond)
